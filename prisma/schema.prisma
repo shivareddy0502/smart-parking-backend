@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  HOST
+  GUEST
+}
+
+enum UserRole {
+  DRIVER
+  OWNER
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum TransactionType {
+  PAYMENT
+  EARNING
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum VehicleCapacity {
+  TWO_WHEELER
+  FOUR_WHEELER
+  SIX_WHEELER
+  EIGHT_WHEELER
+  TEN_WHEELER
+}
+
+enum PricingType {
+  HOURLY
+  DAILY
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  pushToken     String?
+  role          Role           @default(GUEST)
+  activeRole    UserRole       @default(DRIVER)
+  createdAt     DateTime       @default(now())
+  
+  bookings      Booking[]
+  recvMessages  Message[]      @relation("ReceivedMessages")
+  sentMessages  Message[]      @relation("SentMessages")
+  notifications Notification[]
+  reviews       Review[]
+  spots         Spot[]
+  transactions  Transaction[]
+  vehicles      Vehicle[]
+  savedSpots    SavedSpot[]
+}
+
+model Spot {
+  id            String          @id @default(uuid())
+  title         String
+  location      String
+  description   String?
+  rate          Float           // pricePerHour
+  pricePerDay   Float           @default(0)
+  capacity      VehicleCapacity @default(FOUR_WHEELER)
+  availableFrom String          @default("06:00")
+  availableTo   String          @default("23:00")
+  photos        String[]
+  features      String[]
+  totalBookings Int             @default(0)
+  hostId        String
+  createdAt     DateTime        @default(now())
+  latitude      Float?
+  longitude     Float?
+  
+  bookings      Booking[]
+  devices       Device[]
+  reviews       Review[]
+  host          User            @relation(fields: [hostId], references: [id])
+  savedBy       SavedSpot[]
+}
+
+model Device {
+  id            String       @id @default(uuid())
+  macAddress    String       @unique
+  status        DeviceStatus @default(OFFLINE)
+  lastHeartbeat DateTime     @default(now())
+  spotId        String
+  spot          Spot         @relation(fields: [spotId], references: [id])
+}
+
+model Booking {
+  id              String        @id @default(uuid())
+  startTime       DateTime
+  endTime         DateTime
+  totalAmount     Float         // totalPrice
+  pricingType     PricingType   @default(HOURLY)
+  status          BookingStatus @default(PENDING)
+  spotId          String
+  guestId         String
+  razorpayOrderId String?
+  
+  // Mobile contract fields
+  spotTitle       String?
+  spotAddress     String?
+  driverName      String?
+  vehicleType     VehicleCapacity @default(FOUR_WHEELER)
+  
+  digitalKey      DigitalKey?
+  guest           User          @relation(fields: [guestId], references: [id])
+  spot            Spot          @relation(fields: [spotId], references: [id])
+  createdAt       DateTime      @default(now())
+}
+
+model DigitalKey {
+  id        String   @id @default(uuid())
+  payload   String   // PSK-<64-char random string>
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  bookingId String   @unique
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+}
+
+model Transaction {
+  id        String            @id @default(uuid())
+  amount    Float
+  type      TransactionType
+  status    TransactionStatus @default(COMPLETED)
+  createdAt DateTime          @default(now())
+  userId    String
+  bookingId String?
+  spotTitle String?
+  user      User              @relation(fields: [userId], references: [id])
+}
+
+model Vehicle {
+  id        String          @id @default(uuid())
+  name      String
+  type      VehicleCapacity
+  plate     String
+  userId    String
+  user      User            @relation(fields: [userId], references: [id])
+  createdAt DateTime        @default(now())
+}
+
+model SavedSpot {
+  userId String
+  spotId String
+  user   User   @relation(fields: [userId], references: [id])
+  spot   Spot   @relation(fields: [spotId], references: [id])
+
+  @@id([userId, spotId])
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  content    String
+  timestamp  DateTime @default(now())
+  read       Boolean  @default(false)
+  senderId   String
+  receiverId String
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
+}
+
+model Review {
+  id           String   @id @default(uuid())
+  rating       Int
+  comment      String?
+  reviewerName String?
+  createdAt    DateTime @default(now())
+  spotId       String
+  guestId      String
+  bookingId    String?
+  guest        User     @relation(fields: [guestId], references: [id])
+  spot         Spot     @relation(fields: [spotId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+}
