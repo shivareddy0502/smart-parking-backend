@@ -44,3 +44,23 @@ export const authorizeRole = (allowedRoles: string[]) => {
     next();
   };
 };
+
+export const optionalAuthenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+    req.user = {
+      userId: decoded.userId || decoded.sub,
+      role: decoded.role || 'GUEST'
+    };
+    next();
+  } catch (error) {
+    next();
+  }
+};
+

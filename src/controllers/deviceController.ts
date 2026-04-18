@@ -1,53 +1,63 @@
 import { Request, Response } from 'express';
-import prisma from '../utils/prisma';
-import { AuthRequest } from '../middleware/auth';
+import { PrismaClient } from '@prisma/client';
 
-export const getHostDevices = async (req: AuthRequest, res: Response): Promise<void> => {
+const prisma = new PrismaClient();
+
+/**
+ * Public endpoint for IoT Hardware to report health/connectivity
+ */
+export const reportHeartbeat = async (req: Request, res: Response) => {
   try {
-    const hostId = req.user?.userId;
-    if (!hostId) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
+    const { macAddress, status } = req.body;
+
+    if (!macAddress) {
+      return res.status(400).json({ error: 'MAC Address is required' });
     }
 
-    const devices = await prisma.device.findMany({
-      where: {
-        spot: { hostId }
-      },
-      include: {
-        spot: { select: { title: true } }
+    const device = await (prisma.device as any).update({
+      where: { macAddress },
+      data: {
+        status: status?.toUpperCase() === 'OFFLINE' ? 'OFFLINE' : 'ONLINE',
+        lastHeartbeat: new Date(),
       }
     });
 
-    res.json(devices);
+    res.json({ status: 'success', message: 'Heartbeat acknowledged', device: device.macAddress });
   } catch (error) {
-    res.status(500).json({ error: 'Server error fetching devices' });
+    console.error('Heartbeat failed:', error);
+    res.status(500).json({ error: 'Failed to record heartbeat' });
   }
 };
 
-export const controlDevice = async (req: AuthRequest, res: Response): Promise<void> => {
+export const getHostDevices = async (req: Request, res: Response) => {
   try {
-    const id = req.params.id as string;
-    const { action } = req.body; // 'RAISE' | 'LOWER' | 'REBOOT'
-
-    const device = await prisma.device.findUnique({
-      where: { id },
+    const hostId = (req as any).user.id;
+    const devices = await (prisma.device as any).findMany({
+      where: { spot: { hostId } },
       include: { spot: true }
     });
-
-    if (!device) {
-      res.status(404).json({ error: 'Device not found' });
-      return;
-    }
-
-    if (device.spot.hostId !== req.user?.userId) {
-      res.status(403).json({ error: 'Forbidden' });
-      return;
-    }
-
-    // Simulate sending a command to the ESP32
-    res.json({ message: `Command '${action}' sent to device ${device.macAddress} successfully` });
+    res.json(devices);
   } catch (error) {
-    res.status(500).json({ error: 'Server error controlling device' });
+    res.status(500).json({ error: 'Failed' });
+  }
+};
+
+export const controlDevice = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body; // e.g., 'REBOOT', 'TOGGLE'
+    
+    // Simulate relay signal
+    await (prisma as any).deviceLog.create({
+      data: {
+        deviceId: id,
+        action: `REMOTE_${action}`,
+        performedBy: (req as any).user.name || 'Host'
+      }
+    });
+
+    res.json({ status: 'success', message: `Signal ${action} sent to device.` });
+  } catch (error) {
+    res.status(500).json({ status: 'fail', error: 'Control failed' });
   }
 };

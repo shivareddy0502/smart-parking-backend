@@ -1,13 +1,17 @@
 import { Router } from 'express';
-import { createOrder, handleWebhook } from '../controllers/paymentController';
+import { initiateUPIPayment, verifyUPIPayment, resumePayment } from '../controllers/paymentController';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
-// Guest creates a new payment order
-router.post('/create-order', authenticate, createOrder);
+// Guest initiates a new UPI payment
+router.post('/initiate-upi', authenticate, initiateUPIPayment);
 
-// Razorpay Webhook processor
-router.post('/webhook', handleWebhook);
+// Verify Razorpay signature and confirm booking
+router.post('/verify-upi', authenticate, verifyUPIPayment);
+
+// Resume payment for a pending booking (re-opens Razorpay with existing order)
+router.get('/resume/:bookingId', authenticate, resumePayment);
 
 export default router;
+

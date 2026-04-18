@@ -34,6 +34,8 @@ enum BookingStatus {
 enum TransactionType {
   PAYMENT
   EARNING
+  REFUND
+  PAYOUT
 }
 
 enum TransactionStatus {
@@ -55,6 +57,11 @@ enum PricingType {
   DAILY
 }
 
+enum TicketType {
+  SPOT_ISSUE
+  PLATFORM_ISSUE
+}
+
 model User {
   id            String         @id @default(uuid())
   email         String         @unique
@@ -64,6 +71,7 @@ model User {
   pushToken     String?
   role          Role           @default(GUEST)
   activeRole    UserRole       @default(DRIVER)
+  status        String         @default("Active")
   createdAt     DateTime       @default(now())
   
   bookings      Booking[]
@@ -75,6 +83,7 @@ model User {
   transactions  Transaction[]
   vehicles      Vehicle[]
   savedSpots    SavedSpot[]
+  supportTickets SupportTicket[] @relation("GuestTickets")
 }
 
 model Spot {
@@ -109,6 +118,7 @@ model Device {
   lastHeartbeat DateTime     @default(now())
   spotId        String
   spot          Spot         @relation(fields: [spotId], references: [id])
+  logs          DeviceLog[]
 }
 
 model Booking {
@@ -120,7 +130,10 @@ model Booking {
   status          BookingStatus @default(PENDING)
   spotId          String
   guestId         String
-  razorpayOrderId String?
+  paymentRef      String?
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
   
   // Mobile contract fields
   spotTitle       String?
@@ -131,6 +144,9 @@ model Booking {
   digitalKey      DigitalKey?
   guest           User          @relation(fields: [guestId], references: [id])
   spot            Spot          @relation(fields: [spotId], references: [id])
+  supportTickets  SupportTicket[]
+  messages        Message[]
+  transactions    Transaction[]
   createdAt       DateTime      @default(now())
 }
 
@@ -149,9 +165,11 @@ model Transaction {
   amount    Float
   type      TransactionType
   status    TransactionStatus @default(COMPLETED)
+  isFlagged Boolean           @default(false)
   createdAt DateTime          @default(now())
   userId    String
   bookingId String?
+  booking   Booking?          @relation(fields: [bookingId], references: [id])
   spotTitle String?
   user      User              @relation(fields: [userId], references: [id])
 }
@@ -182,6 +200,8 @@ model Message {
   read       Boolean  @default(false)
   senderId   String
   receiverId String
+  bookingId  String?
+  booking    Booking? @relation(fields: [bookingId], references: [id])
   receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
   sender     User     @relation("SentMessages", fields: [senderId], references: [id])
 }
@@ -208,3 +228,39 @@ model Notification {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
 }
+
+model SupportTicket {
+  id            String     @id @default(uuid())
+  description   String
+  imageUrl      String?
+  status        String     @default("OPEN")
+  type          TicketType @default(SPOT_ISSUE)
+  isEscalated   Boolean    @default(false)
+  reservationId String?
+  booking       Booking?   @relation(fields: [reservationId], references: [id])
+  guestId       String
+  guest         User       @relation("GuestTickets", fields: [guestId], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model DeviceLog {
+  id          String   @id @default(uuid())
+  action      String   // RAISE_BARRIER, LOWER_BARRIER, REBOOT_ESP32, STATUS_OVERRIDE
+  performedBy String   // User Name or ID
+  deviceId    String
+  device      Device   @relation(fields: [deviceId], references: [id])
+  timestamp   DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  userEmail   String
+  action      String   // e.g., "UPDATE_USER_STATUS", "DELETE_VEHICLE", "FLAG_TRANSACTION"
+  resource    String   // e.g., "User", "Booking", "Transaction"
+  resourceId  String?
+  details     String?  // JSON string
+  timestamp   DateTime @default(now())
+}
+

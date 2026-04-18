@@ -1,11 +1,20 @@
 import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth';
+import { logAction } from '../utils/auditLogger';
 
 // Get all spots (for Guest Search)
-export const getAllSpots = async (req: Request, res: Response): Promise<void> => {
+export const getAllSpots = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const userId = req.user?.userId;
+    const where: any = {};
+
+    if (userId) {
+      where.NOT = { hostId: userId };
+    }
+
     const spots = await prisma.spot.findMany({
+      where,
       include: {
         host: { select: { name: true } },
         reviews: { select: { rating: true } },
@@ -80,6 +89,7 @@ export const getHostSpots = async (req: AuthRequest, res: Response): Promise<voi
 export const createSpot = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const hostId = req.user?.userId;
+    const hostEmail = (req as any).user?.email || 'host@sys';
     if (!hostId) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
@@ -88,10 +98,21 @@ export const createSpot = async (req: AuthRequest, res: Response): Promise<void>
     const { name, address, pricePerHour, vehicleTypes, macAddress, latitude, longitude } = req.body;
 
     const features = [];
+    let capacity = 'FOUR_WHEELER';
+
     if (vehicleTypes) {
-      if (vehicleTypes.twowheeler) features.push('2W Compatible');
-      if (vehicleTypes.fourwheeler) features.push('4W Compatible');
-      if (vehicleTypes.sixwheeler) features.push('Heavy Vehicle Compatible');
+      if (vehicleTypes.twowheeler) {
+        features.push('2W Compatible');
+        capacity = 'TWO_WHEELER';
+      }
+      if (vehicleTypes.fourwheeler) {
+        features.push('4W Compatible');
+        capacity = 'FOUR_WHEELER';
+      }
+      if (vehicleTypes.sixwheeler) {
+        features.push('Heavy Vehicle Compatible');
+        capacity = 'SIX_WHEELER';
+      }
     }
 
     const newSpot = await prisma.spot.create({
@@ -103,6 +124,7 @@ export const createSpot = async (req: AuthRequest, res: Response): Promise<void>
         longitude: longitude && !isNaN(parseFloat(longitude)) ? parseFloat(longitude) : null,
         rate: parseFloat(pricePerHour),
         features,
+        capacity: capacity as any,
         hostId,
         devices: macAddress ? {
           create: {
@@ -114,9 +136,67 @@ export const createSpot = async (req: AuthRequest, res: Response): Promise<void>
       },
     });
 
+    // PLATFORM LOG
+    await logAction(hostId, hostEmail, 'REGISTER_SPOT', 'Spot', newSpot.id, { spotTitle: name, mac: macAddress });
+
     res.status(201).json(newSpot);
   } catch (error) {
     console.error('Error creating spot:', error);
     res.status(500).json({ error: 'Server error creating spot' });
+  }
+};
+export const getSavedSpots = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const saved = await (prisma as any).savedSpot.findMany({
+      where: { userId },
+      select: { spotId: true }
+    });
+    res.json(saved.map((s: any) => s.spotId));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error fetching saved spots' });
+  }
+};
+
+export const saveSpot = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const { spotId } = req.params;
+    await (prisma as any).savedSpot.upsert({
+      where: { userId_spotId: { userId, spotId } },
+      create: { userId, spotId },
+      update: {}
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error saving spot' });
+  }
+};
+
+export const unsaveSpot = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const { spotId } = req.params;
+    await (prisma as any).savedSpot.deleteMany({
+      where: { userId, spotId }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error unsaving spot' });
   }
 };
